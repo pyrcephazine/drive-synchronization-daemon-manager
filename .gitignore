@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+dist/
+.venv/
+.idea/
+.vscode/
+.env
+.env.*
+rclone.conf
+*.pem
+*.key
