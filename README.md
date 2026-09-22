@@ -10,17 +10,17 @@ The desktop app requires X11 or XWayland. No pip dependencies are needed.
 
 Run from source:
 ```
-    make run
+make run
 ```
 Install for the current user:
 ```
-    make install-user
-    ~/.local/bin/drive-synchronization-daemon-manager
+make install-user
+~/.local/bin/drive-synchronization-daemon-manager
 ```
 Build and install a Debian package system-wide:
 ```
-    make deb
-    sudo apt install ./dist/drive-synchronization-daemon-manager_0.2.0_all.deb
+make deb
+sudo apt install ./dist/drive-synchronization-daemon-manager_0.2.0_all.deb
 ```
 The Debian package installs dependencies through apt. Run the app as your
 normal user. Each user keeps their own accounts, settings, and sync services.
@@ -36,7 +36,7 @@ files are stored under ~/.local. XDG directory overrides are supported.
 
 Run tests:
 ```
-    make test
-    make deb
-    python3 tests/package_smoke.py
+make test
+make deb
+python3 tests/package_smoke.py
 ```
