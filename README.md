@@ -1,4 +1,4 @@
-Drive Synchronization Daemon Manager
+# Drive Synchronization Daemon Manager
 
 This is a GTK desktop application for syncing a local folder with remote
 storage through `rclone`.
