@@ -237,6 +237,14 @@ class CommandTests(unittest.TestCase):
         self.assertNotIn("took too long to respond", str(caught.exception))
         self.assertFalse(runner.children)
 
+    def test_repeated_stop_requests_do_not_abort_rclone_cleanup(self):
+        runner = Runner()
+        child = Mock()
+        runner.children.add(child)
+        runner.interrupt()
+        runner.interrupt()
+        child.send_signal.assert_called_once()
+
 
 class ManagerTests(unittest.TestCase):
     def setUp(self):

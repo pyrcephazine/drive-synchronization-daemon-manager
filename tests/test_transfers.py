@@ -221,4 +221,6 @@ class TransferIntegrationTests(unittest.TestCase):
         self.assertIn("Saved connection details are missing", result["error"])
         (self.cfg.state / "initialized").unlink()
         result = scan(self.cfg)
-        self.assertIn("first sync", result["error"])
+        self.assertIn("Saved connection details are missing", result["error"])
+        self.assertFalse((self.cfg.state / "initialized").exists())
+        self.assertFalse((self.cfg.state / "identity.json").exists())

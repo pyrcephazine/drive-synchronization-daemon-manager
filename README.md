@@ -31,8 +31,6 @@ create the connection. Wait for the first sync to finish before editing files.
 Closing the app leaves background sync running while the user session exists.
 
 Sync works in both directions, including deletions. Keep separate backups.
-Settings and credentials are stored under ~/.config; sync state and recovery
-files are stored under ~/.local. XDG directory overrides are supported.
 
 Run tests:
 ```

@@ -161,10 +161,10 @@ class EngineIntegrationTests(unittest.TestCase):
         self.assertEqual(run(self.cfg), 0)
         (self.cfg.state / "initialized").unlink()
         (self.local / "seed-0.txt").unlink()
-        self.assertEqual(run(self.cfg), 1)
+        self.assertEqual(run(self.cfg), 0)
         self.assertFalse((self.local / "seed-0.txt").exists())
-        self.assertTrue((self.remote / "seed-0.txt").exists())
-        self.assertIn("cannot safely restart setup automatically", json.loads((self.cfg.state / "status.json").read_text())["message"])
+        self.assertFalse((self.remote / "seed-0.txt").exists())
+        self.assertTrue((self.cfg.state / "initialized").is_file())
 
 
 if __name__ == "__main__":

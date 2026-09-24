@@ -60,7 +60,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/python3 {unit_quote(launcher)} {mode} --config {unit_quote(config_path)}
-SuccessExitStatus=75
+SuccessExitStatus=75 130
 Nice={cfg.cpu_nice}
 IOSchedulingClass=best-effort
 IOSchedulingPriority={cfg.io_priority}
@@ -170,14 +170,19 @@ class Manager:
         return self.installation.inspect()
 
     def maintain(self, retry=False, reviewed_token=None):
-        # One attempt per observed incident, shared by GUI, watcher and CLI.
+        # Serialize maintenance across the GUI, watcher and CLI.
         with process_lock("manager"), file_lock(self.units / ".rclone-local-sync-manager.lock"):
             report = self.inspect_installation()
             if report["state"] in ("healthy", "removed", "unconfigured"):
                 return report
             attempt = self.installation.root / "repair-attempt.json"
             previous = read_json(attempt)
-            if not retry and (report["state"] != "repairable" or previous.get("token") == report["token"]):
+            history_recovery = any(issue["code"] == "history" for issue in report["issues"])
+            # History verification may need the remote to come back online.
+            # Retry it on the next scheduled run instead of permanently latching
+            # a transient verification failure behind the Retry repair button.
+            if not retry and (report["state"] != "repairable" or
+                              (previous.get("token") == report["token"] and not history_recovery)):
                 if previous.get("token") == report["token"]:
                     report["error"] = previous.get("error")
                 return report

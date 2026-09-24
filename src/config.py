@@ -146,7 +146,10 @@ class Settings:
 
     @property
     def initialized(self):
-        return (self.state / "initialized").is_file()
+        # Any completed-sync record prevents accidental first-time setup.
+        # Repair validates the history before restoring missing marker files.
+        return any((self.state / name).is_file() for name in
+                   ("initialized", "baseline-established", "history-checkpoint.json"))
 
     def identity(self):
         # A changed view of the files must never silently reuse old deletion history.

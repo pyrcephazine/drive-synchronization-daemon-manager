@@ -133,7 +133,7 @@ class InstallationTests(unittest.TestCase):
         marker.write_text(self.cfg.health_content)
         for side in ("path1", "path2"):
             self.assertEqual(self.install.inspect()["state"], "review")
-            (self.cfg.state / "bisync" / f"test.{side}.lst").write_text("history")
+            (self.cfg.state / "bisync" / f"test.{side}.lst").write_text("# bisync listing v1 from test\n")
         self.assertEqual(self.install.inspect()["state"], "healthy")
         marker.unlink()
         self.assertEqual(self.manager.maintain()["state"], "review")
@@ -144,6 +144,32 @@ class InstallationTests(unittest.TestCase):
         self.manager.owner_path.write_text(json.dumps({"config": str(self.manager.config_path)}))
         self.assertEqual(self.manager.maintain()["state"], "healthy")
         self.assertTrue(self.install.manifest_path.exists())
+
+    def test_automatic_history_repair_keeps_external_pause(self):
+        from src import history
+        (self.cfg.state / "initialized").touch()
+        (self.cfg.state / "baseline-established").touch()
+        work = self.cfg.state / "bisync"
+        work.mkdir()
+        Path(self.cfg.local_dir).mkdir()
+        (Path(self.cfg.local_dir) / self.cfg.health_file).write_text(self.cfg.health_content)
+        for side in ("path1", "path2"):
+            (work / f"test.{side}.lst-old").write_text("# bisync listing v1 from test\n")
+        report = self.install.inspect()
+        self.assertEqual(report["state"], "repairable")
+        self.assertEqual(report["issues"][0]["code"], "history")
+        self.active.clear()
+        with patch("src.engine.Runner") as runner:
+            runner.return_value.call.side_effect = SyncError("Remote temporarily unavailable")
+            self.assertEqual(self.manager.maintain()["state"], "repairable")
+        self.assertFalse(list(work.glob("*.lst")))
+        with patch("src.engine.Runner") as runner:
+            result = self.manager.maintain()
+            self.assertIn("--check-sync=only", runner.return_value.call.call_args.args[0])
+        self.assertEqual(result["state"], "healthy")
+        self.assertFalse(self.active)
+        self.assertEqual(history.status(self.cfg), "ready")
+        self.assertEqual(json.loads((self.cfg.state / "change-baseline.json").read_text()), {"schema": 0})
 
     def test_reload_stale_systemd_metadata(self):
         self.overrides[SERVICE] = {"NeedDaemonReload": "yes"}

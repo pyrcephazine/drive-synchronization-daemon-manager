@@ -210,6 +210,11 @@ class ChangeTests(unittest.TestCase):
         self.assertTrue((self.cfg.state / "force-sync").read_text())
         self.assertIn(("start", "--no-block", "rclone-local-sync.service"), [call.args for call in ctl.call_args_list])
         self.assertIn("--worker --check-changes", render_service(self.cfg, manager.config_path, manager.launcher))
+        service = render_service(self.cfg, manager.config_path, manager.launcher)
+        self.assertIn("SuccessExitStatus=75 130", service)
+        self.assertIn("KillSignal=SIGINT", service)
+        self.assertIn("KillMode=mixed", service)
+        self.assertIn("TimeoutStopSec=2min", service)
         self.assertNotIn("--check-changes", render_service(self.cfg, manager.config_path, manager.launcher, preview=True))
         self.assertIn("Restart=on-failure", render_watcher(self.cfg, manager.config_path, manager.launcher))
 

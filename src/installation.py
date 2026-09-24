@@ -12,6 +12,7 @@ import uuid
 from .config import SERVICE, TIMER, WATCH_SERVICE, Settings, SyncError, atomic_write, config_root, write_json
 from .locking import BusyError, file_lock, operation_lock
 from .rclone import require_rclone
+from . import history
 
 PREVIEW = "rclone-local-sync-preview.service"
 UNITS = (SERVICE, PREVIEW, TIMER, WATCH_SERVICE)
@@ -175,7 +176,7 @@ class Installation:
                     pass
         return False
 
-    def validate_connection(self, cfg):
+    def validate_connection(self, cfg, allow_history_repair=False):
         cfg.validate()
         if not self.manager.launcher.is_file():
             raise SyncError("The installed program is missing. Reinstall the app.")
@@ -184,11 +185,12 @@ class Installation:
         if identity.get("fingerprint") != cfg.fingerprint() or (cfg.state / "retired").exists():
             raise SyncError("The saved connection identity does not match. Restore the original settings and history.")
         if cfg.initialized:
-            if not (cfg.state / "baseline-established").is_file():
-                raise SyncError("The setup history is missing. Restore it from a verified backup.")
-            for side in ("path1", "path2"):
-                if not list((cfg.state / "bisync").glob(f"*.{side}.lst")):
-                    raise SyncError("Sync history is missing. Restore it from a verified backup.")
+            state = history.status(cfg)
+            if state == "missing":
+                raise SyncError("Sync history and recovery copies are missing. Restore a verified history checkpoint; "
+                                "new files cannot safely be distinguished from deletions without it.")
+            if state == "recoverable" and not allow_history_repair:
+                raise SyncError("Sync history needs recovery. Open Repair to restore the saved history.")
             marker = Path(cfg.local_dir) / cfg.health_file
             if not marker.is_file() or marker.read_text() != cfg.health_content:
                 raise SyncError("The local health marker is missing or changed. Restore the original marker.")
@@ -213,7 +215,9 @@ class Installation:
             return self.report(issues, "unconfigured")
         try:
             cfg = Settings.load(m.config_path)
-            self.validate_connection(cfg)
+            self.validate_connection(cfg, allow_history_repair=True)
+            if cfg.initialized and history.status(cfg) == "recoverable":
+                issue("history", cfg.state / "bisync", "Recover validated sync history from the saved checkpoint or rclone backup.", True)
             expected = self.artifacts(cfg)
             manifest = self.load_manifest() if self.manifest_path.exists() else None
             if manifest and manifest["fingerprint"] != cfg.fingerprint():
@@ -416,9 +420,13 @@ class Installation:
             raise SyncError("Review the installation issues before repairing it.")
         m = self.manager
         cfg = Settings.load(m.config_path)
-        self.validate_connection(cfg)
+        self.validate_connection(cfg, allow_history_repair=True)
         m.assert_idle(cfg)
         with operation_lock(), file_lock(cfg.state / "run.lock"):
+            if cfg.initialized and history.status(cfg) == "recoverable":
+                from .engine import Runner, configure_logger
+                history.recover(cfg, Runner(configure_logger(cfg, False)))
+                self.event("Recovered sync history; full reconciliation required.")
             changes = self.artifacts(cfg)
             old = self.load_manifest() if self.manifest_path.exists() else None
             obsolete = []

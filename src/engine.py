@@ -134,18 +134,28 @@ class Runner:
     def __init__(self, logger=None):
         self.log = logger or logging.getLogger("localdrive")
         self.children = set()
+        self.stop_signalled = set()
         # Signal handlers may interrupt the main thread while it owns this lock.
         self.lock = threading.RLock()
         self.interrupted = False
 
     def interrupt(self, *_args):
-        self.interrupted = True
         with self.lock:
+            # A second SIGINT makes rclone abandon graceful cleanup. Duplicate
+            # stop requests must not turn a normal shutdown into a forced exit.
+            if self.interrupted:
+                return
+            self.interrupted = True
             for child in self.children:
-                try:
-                    child.send_signal(signal.SIGINT)
-                except ProcessLookupError:
-                    pass
+                self.interrupt_child(child)
+
+    def interrupt_child(self, child):
+        if child not in self.stop_signalled:
+            self.stop_signalled.add(child)
+            try:
+                child.send_signal(signal.SIGINT)
+            except ProcessLookupError:
+                pass
 
     def call(self, args, **kwargs):
         for index, arg in enumerate(args):
@@ -172,10 +182,7 @@ class Runner:
             self.children.add(child)
             # A stop can arrive between the initial check and Popen returning.
             if self.interrupted:
-                try:
-                    child.send_signal(signal.SIGINT)
-                except ProcessLookupError:
-                    pass
+                self.interrupt_child(child)
         try:
             if stream:
                 for line in child.stdout:
@@ -202,6 +209,7 @@ class Runner:
             child.stdout.close()
             with self.lock:
                 self.children.discard(child)
+                self.stop_signalled.discard(child)
 
 
 def check_rclone(cfg, runner):
@@ -350,6 +358,9 @@ def run(cfg, preview=False, check_changes=False):
         try:
             check_identity(cfg)
             check_rclone(cfg, runner)
+            if cfg.initialized and not preview:
+                from . import history
+                history.recover(cfg, runner)
             if cfg.excludes:
                 expected = filter_text(cfg)
                 path = cfg.state / "filters.txt"
@@ -367,6 +378,11 @@ def run(cfg, preview=False, check_changes=False):
                 if runner.interrupted:
                     raise SyncError("Sync stopped. The next sync will try again.")
                 if check_changes and checkpoint is not None and not checkpoint["needed"]:
+                    # Seed the durable copy on upgrade, using the unchanged,
+                    # previously reconciled history verified by the fast gate.
+                    from .history import CHECKPOINT, save
+                    if not (cfg.state / CHECKPOINT).exists():
+                        save(cfg)
                     commit(cfg, checkpoint)
                     finished = timestamp()
                     write_json(status_path, {"phase": "unchanged", "started": started, "finished": finished,
@@ -398,6 +414,9 @@ def run(cfg, preview=False, check_changes=False):
             else:
                 preflight(cfg, runner)
                 runner.call(bisync_command(cfg), stream=True)
+            if not preview:
+                from .history import save
+                save(cfg)
             if checkpoint is not None:
                 commit(cfg, checkpoint, reconciled=True)
             finished = timestamp()
@@ -408,12 +427,17 @@ def run(cfg, preview=False, check_changes=False):
             log.info("Preview finished. Your files are unchanged." if preview else "Sync finished successfully.")
             return 0
         except Exception as error:
-            write_json(status_path, {"phase": "stopped" if runner.interrupted else "error", "started": started,
+            write_json(status_path, {"phase": "stopped" if runner.interrupted else "waiting" if isinstance(error, BusyError) else "error", "started": started,
                                     "finished": timestamp(), "message": str(error),
                                     **({"conflicts": {"fingerprint": cfg.fingerprint(), "rows": error.rows}}
                                        if isinstance(error, InventoryConflictError) else {})})
-            log.error("Sync stopped: %s", error)
-            return 130 if runner.interrupted else 1
+            if runner.interrupted:
+                log.info("Sync stopped by request. Saved history will be recovered automatically on the next run.")
+            elif isinstance(error, BusyError):
+                log.info("Sync deferred: %s", error)
+            else:
+                log.error("Sync stopped: %s", error)
+            return 130 if runner.interrupted else 75 if isinstance(error, BusyError) else 1
         finally:
             for sig, handler in old_handlers.items():
                 signal.signal(sig, handler)
